@@ -1,0 +1,17 @@
+config={
+         "XianYiRenXDeXianShen.txt":{
+              "pattern":"^@chapter$",
+              "lenght":8,
+              "type":0
+         },
+         "baiyexing.txt":{
+              "pattern":"^@chapter$",
+              "lenght":8,
+              "type":1
+         },
+         "HuanYe.txt":{
+              "pattern":"^@chapter$",
+              "lenght":8,
+              "type":1
+         }
+}
