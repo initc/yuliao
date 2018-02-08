@@ -479,7 +479,7 @@ class Gleu(object):
             if lines_index == len(lines_ori):
               break
             len_p += 1 # 增加段落数
-        return para_ori,duan_line,line_duan,len_p
+        return para_ori,duan_line,line_duan
         
 
     def compare(self ,zh_dir , jp_dir, trans_dir):
@@ -519,7 +519,7 @@ class Gleu(object):
                         save_cn.append(p_cn_paras)
                         save_jp.append(p_jp_paras)
                         save_trans.append(p_trans_paras)
-                        poss.append(pos)
+                        poss.append([pos,dt_len,do_len])
                     self.save_paras(save_cn, save_trans, save_jp, poss, f_name)
                 elif p_type==1 :
                     pattern = re.compile(self_config["pattern"])
@@ -550,7 +550,7 @@ class Gleu(object):
                             save_cn.append(p_cn_paras)
                             save_jp.append(p_jp_paras)
                             save_trans.append(p_trans_paras)
-                            poss.append(pos)
+                            poss.append([pos, dt_len, do_len])
                     self.save_paras(save_cn, save_trans, save_jp, poss, f_name)
         except Exception as err:
             traceback.print_exc()
@@ -566,7 +566,7 @@ class Gleu(object):
             for paras_cn, paras_trasn, paras_jp, pos in zip(_paras_cn, _paras_trasn, _paras_jp, _pos):
                 cn_len = len(paras_cn)
                 jp_len = len(paras_jp)
-                for i,p in  enumerate(pos):
+                for i,p in  enumerate(pos[0]):
                     match_len = p[2]
                     zh_floor = max(0, p[0]-show_len)
                     zh_ceil = min(cn_len, p[0]+show_len)
@@ -580,9 +580,11 @@ class Gleu(object):
                     content["CONTEXT_JP"] = " || ".join(paras_jp[jp_floor:jp_ceil])
                     content["CONTEXT_TRANS"] = " || ".join(paras_trasn[jp_floor:jp_ceil])
                     content["MATCHED_LEN"] = p[2]
-                    content["MATCHED_ZH_PARAS"] = p[5]
-                    content["MATCHED_JP_PARAS"] = p[4]
+                    content["MATCHED_ZH_PARAS"] = p[4]
+                    content["MATCHED_JP_PARAS"] = p[5]
                     content["GLEU"]=p[3]
+                    content["ZH_DUAN_LEN"] = pos[1]
+                    content["JP_DUAN_LEN"] = pos[2]
                     content["MATCHED"] = 0
 
                     json_result.append(content)
