@@ -124,10 +124,10 @@ def paras_rate(filename,p=True):
             info = analysis["many_no_match"]
         elif match_type == 7:
             info = analysis["zh_lenght_error"]
-        info[0].append(abs(r["MATCHED_ZH_PARAS"]/r["ZH_DUAN_LEN"]-r["MATCHED_JP_PARAS"]/r["JP_DUAN_LEN"]))
+        info[0].append(r["MATCHED_ZH_PARAS"]/r["ZH_DUAN_LEN"]-r["MATCHED_JP_PARAS"]/r["JP_DUAN_LEN"])
     for k, v in analysis.items():
         if not len(v[0]): continue
-        v0 = np.array(v[0])
+        v0 = np.array(list(map(abs,v[0])))
         v.append(np.mean(v0))
     if p:
         print(json.dumps(analysis, ensure_ascii=False, indent=4))
