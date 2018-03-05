@@ -77,15 +77,15 @@ class Gleu(object):
         return max_gleu,match_len
 
        
-    def compare_s(self, paras_t, paras_o, len_match = 3, low_gleu=0.1):
+    def compare_duan(self, paras_t, paras_o, len_match = 3, low_gleu=0.1):
         '''
         @paras compare_len: 一对多的匹配  最多匹配len_match个
         @paras  : zh paras
         @paras paras_o : translate paras
         @paras info : 文章参数
         '''
-        acc_t = []
-        acc_o = []
+        acc_t = [] #中文段落的ngram
+        acc_o = [] #翻译段落的ngram
         tmp_o = []
         for i in paras_t:
             i = "".join(i)
@@ -107,15 +107,13 @@ class Gleu(object):
                 acc.append(tmp.copy())
             acc_o.append(acc)
         self.acc_o = acc_o
-        #print("acc_o ",acc_o)
 
         len_duan_jp = len(paras_o)  # 获取翻译文章的总的段落数
         len_duan_zh = len(paras_t)
         distance = max(len_duan_jp, len_duan_zh)-min(len_duan_zh, len_duan_jp)
-        #zh_line_len = len(t_line_duan)
-        #trans_line_len = len(o_line_duan)
-        #print("duan: ",len_duan_zh,"-",len_duan," distance: ",max(len_duan_zh,len_duan)-min(len_duan_zh,len_duan)," lines: ",zh_line_len,"-",trans_line_len," distance: ",max(zh_line_len,trans_line_len)-min(zh_line_len,trans_line_len))
         pos=[]
+
+        #进行段落的对比
         for in_t,t in enumerate(acc_t):
             #如果字符串太短，就没有很大的意义
             #if len(t) <= l:
@@ -136,7 +134,6 @@ class Gleu(object):
             
             for index_o in range(begin,end):
                 in_o = index_o
-                o = acc_o[in_o]
                 gleu,_match_len = self.acc_gleu_compare(in_t,in_o)
                 #print(gleu,_match_len)
                 if gleu > max_gleu:
@@ -147,6 +144,68 @@ class Gleu(object):
             if o_i==None : continue
             pos.append((t_i,o_i,match_len,max_gleu))
         return pos
+
+    def compare_line(self, zh_paras, trans_paras, pos, len_match=3):
+        acc_l_zh = [] #中文句子加速
+        tmp_l_t = []
+        acc_l_t = [] #翻译句子加速
+        zh_duan_line = [] #中文段落到句子的映射
+        zh_line_index = 0
+        trans_duan_line = [] #翻译段落到句子的映射
+        trans_line_index = 0
+        for i in zh_paras:
+            zh_duan_line.append(zh_line_index)
+            zh_line_index += len(i)
+            #计算句子的ngram值
+            for tp in i:
+                acc_l_zh.append(self.ngrams[tp])
+        for i in trans_paras:
+            #段落到句子的一个映射
+            trans_duan_line.append(trans_line_index)
+            trans_line_index += len(i)
+            #计算句子的ngram值
+            for tp in i:
+                tmp_l_t.append(self.ngrams(tp))
+        len_o = len(tmp_l_t)
+        for i in range(len_o):
+            acc = []
+            tmp = set([])
+            for j in range(len_match):
+                if i + j >= len_o:
+                    break
+                tmp |= tmp_l_t[i+j]
+                acc.append(tmp.copy())
+            acc_l_t.append(acc)
+        self.acc_t = acc_l_zh
+        self.acc_o = acc_l_t
+        
+        pos_ = []
+        result_pos = []
+        #进行句子的对比
+        self.acc_t = acc_l_zh
+        self.acc_o = acc_l_t
+        for p in pos:
+            zh_index, trans_index, match_len, _ = p
+            ceil_zh_index = zh_duan_line[zh_index]
+            floor_zh_index = ceil_zh_index + len(zh_paras[zh_index])
+            ceil_trans_index = trans_duan_line[trans_index]
+            floor_trans_index = trans_duan_line[trans_index+match_len-1] + len(trans_paras[trans_index+match_len-1])
+            for zh_i in range(ceil_zh_index,floor_zh_index):
+                max_gleu = 0
+                max_zh_i = None
+                max_trans_i = None
+                match_len = None
+                for trans_i in range(ceil_trans_index, floor_trans_index):
+                    gleu, _match_len = self.acc_gleu_compare(zh_i, trans_i)
+                    if gleu > max_gleu:
+                        max_gleu = gleu
+                        max_zh_i = zh_i
+                        max_trans_i = trans_i
+                        match_len = _match_len
+                if not max_zh_i or max_gleu < 0.09:
+                    continue
+                result_pos.append([max_zh_i, max_trans_i, match_len, max_gleu])
+        return result_pos
 
 
     def read_full_cn(self, fname, pattern, pattern_len):
@@ -504,7 +563,7 @@ class Gleu(object):
                     save_trans = []
                     poss = []
                     for chunk_zh, chunk_jp, chunk_trans in zip(cn_paras, jp_paras, trans_paras):
-                        pos = self.compare_s(chunk_zh, chunk_trans)
+                        pos = self.compare_duan(chunk_zh, chunk_trans)
                         # 保存分析后的文章
                         poss.append([pos])
                     self.save_paras(cn_paras, trans_paras, jp_paras, poss, f_name)
@@ -522,7 +581,7 @@ class Gleu(object):
                     poss = []
                     for _chunk_zh, _chunk_jp, _chunk_trans in zip(cn_paras, jp_paras, trans_paras):
                         for chunk_zh, chunk_jp, chunk_trans in zip(_chunk_zh, _chunk_jp, _chunk_trans):
-                            pos = self.compare_s(chunk_zh, chunk_trans)
+                            pos = self.compare_duan(chunk_zh, chunk_trans)
                             # 保存分析后的文章
                             save_cn.append(chunk_zh)
                             save_jp.append(chunk_jp)
