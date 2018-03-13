@@ -9,17 +9,21 @@ from config import config
 from collections import OrderedDict
 import random
 import traceback
+from functools  import reduce
 
 class Gleu(object):
     """对翻译后的文本进行gleu值的匹配"""
-    def __init__(self, save_dir, random_dir, chunking=1000):
+    def __init__(self, save_dir_duan, random_dir_duan,  save_dir_line, random_dir_line, chunking=1000):
         """
         @paras chuncking:对一个文本的分段大小，默认为500
         """
         self.chunking=chunking
-        self.save_dir = save_dir
-        self.random_dir = random_dir
+        self.save_dir_duan = save_dir_duan
+        self.random_dir_duan = random_dir_duan
+        self.save_dir_line = save_dir_line
+        self.random_dir_line = random_dir_line
         self.pattern = re.compile('(。|``|\?|,|\'\'|\.|\s|")')
+        self.trans_pattern = re.compile("^(``|'').*(``|'')\s。?$")
 
 
     def ngrams(self, s, n=4):
@@ -56,20 +60,6 @@ class Gleu(object):
         return min(common_length/t_len,common_length/o_len)
 
 
-    def gleu_compare_line(self,t,o):
-        t_gleu = self.ngrams(t)
-        o_gleu = set([])
-        for l in o.split("【分行】"):
-            g = self.ngrams(l)
-            o_gleu |= g
-        t_len = len(t_gleu)
-        o_len = len(o_gleu)
-        if not t_len or not o_len:
-            return 0.0
-        #print(o_gleu&t_gleu)
-        common_length = len(o_gleu & t_gleu)
-        return min(common_length/t_len,common_length/o_len), t_len, o_len, common_length
-
     def acc_gleu_compare(self,ti,oi):
         ct = self.acc_t[ti]
         acc_o = self.acc_o[oi]
@@ -89,6 +79,22 @@ class Gleu(object):
                 max_gleu = tmp_gleu
                 match_len = i+1
         return max_gleu,match_len
+
+    def rule_getpos(self, zh_i, trans_i, matched_len):
+        max_gleu = 0.0
+        zh_ngram = self.acc_t[zh_i]
+        index = None
+        for j in range(matched_len):
+            trans_ngram = self.acc_o[trans_i][j]
+            if not len(zh_ngram) or not len(trans_ngram):
+                continue
+            common_length = len(zh_ngram&trans_ngram)
+            tmp_gleu = min(common_length/len(zh_ngram),common_length/len(trans_ngram))
+            if tmp_gleu > max_gleu:
+                max_gleu = tmp_gleu
+                index = j
+        return index, max_gleu
+
 
        
     def compare_duan(self, paras_t, paras_o, len_match = 3, low_gleu=0.1):
@@ -167,12 +173,17 @@ class Gleu(object):
         zh_line_index = 0
         trans_duan_line = [] #翻译段落到句子的映射
         trans_line_index = 0
+        #####
+        jiec_zh = []
+        jiec_jp = []
         for i in zh_paras:
             zh_duan_line.append(zh_line_index)
             zh_line_index += len(i)
             #计算句子的ngram值
             for tp in i:
-                acc_l_zh.append(self.ngrams[tp])
+                acc_l_zh.append(self.ngrams(tp))
+                ######
+                jiec_zh.append(tp)
         for i in trans_paras:
             #段落到句子的一个映射
             trans_duan_line.append(trans_line_index)
@@ -180,6 +191,7 @@ class Gleu(object):
             #计算句子的ngram值
             for tp in i:
                 tmp_l_t.append(self.ngrams(tp))
+                jiec_jp.append(tp)
         len_o = len(tmp_l_t)
         for i in range(len_o):
             acc = []
@@ -198,6 +210,7 @@ class Gleu(object):
         #进行句子的对比
         self.acc_t = acc_l_zh
         self.acc_o = acc_l_t
+        # s="看 到 墙 边 放 着 羽 毛 球 拍 , 怀 念 之 情 不 禁 油 然 而 生 , 他 以 前 大 学 时 也 参 加 过 羽 毛 球 社 。"
         for p in pos:
             zh_index, trans_index, match_len, _ = p
             ceil_zh_index = zh_duan_line[zh_index]
@@ -216,9 +229,23 @@ class Gleu(object):
                         max_zh_i = zh_i
                         max_trans_i = trans_i
                         match_len = _match_len
-                if not max_zh_i or max_gleu < 0.09:
-                    continue
-                result_pos.append([max_zh_i, max_trans_i, match_len, max_gleu])
+                if not max_zh_i:continue
+                _type = 0
+                if match_len > 1 and self.trans_pattern.match(jiec_zh[zh_i]):
+                    index, t_gleu = self.rule_getpos(max_zh_i,max_trans_i,match_len)
+                    if index is not None and self.trans_pattern.match(jiec_jp[max_trans_i+index]):
+                        _type = 1
+                        max_trans_i += index
+                        match_len = 1
+                        max_gleu = t_gleu
+                result_pos.append([max_zh_i, max_trans_i, match_len, max_gleu, _type])
+                # ######
+                # test_line = jiec_zh[zh_i]
+                # if len(test_line)==len(s) and test_line==s:
+                #     print("翻译：","【分行】".join(jiec_jp[ceil_trans_index:floor_trans_index]))
+                #     print("jp:","【分行】".join(jiec_jp[max_trans_i:max_trans_i+match_len]))
+                #     print("ngram:",self.acc_o[max_trans_i])
+                # ######
         return result_pos
 
 
@@ -575,12 +602,16 @@ class Gleu(object):
                     save_cn = []
                     save_jp = []
                     save_trans = []
+
                     poss = []
+                    poss_duan = []
                     for chunk_zh, chunk_jp, chunk_trans in zip(cn_paras, jp_paras, trans_paras):
-                        pos = self.compare_duan(chunk_zh, chunk_trans)
-                        # 保存分析后的文章
+                        pos_d = self.compare_duan(chunk_zh, chunk_trans)
+                        poss_duan.append([pos_d])
+                        pos = self.compare_line(chunk_zh, chunk_trans, pos_d)
                         poss.append([pos])
-                    self.save_paras(cn_paras, trans_paras, jp_paras, poss, f_name)
+                    self.save_paras_duan(cn_paras, trans_paras, jp_paras, poss_duan, f_name)
+                    self.save_paras_line(cn_paras, trans_paras, jp_paras, poss, f_name)
                 elif p_type==1 :
                     pattern = re.compile(self_config["pattern"])
                     pattern_len = self_config["lenght"]
@@ -593,30 +624,34 @@ class Gleu(object):
                     save_jp = []
                     save_trans = []
                     poss = []
+                    poss_duan = []
                     for _chunk_zh, _chunk_jp, _chunk_trans in zip(cn_paras, jp_paras, trans_paras):
                         for chunk_zh, chunk_jp, chunk_trans in zip(_chunk_zh, _chunk_jp, _chunk_trans):
-                            pos = self.compare_duan(chunk_zh, chunk_trans)
+                            pos_d = self.compare_duan(chunk_zh, chunk_trans)
+                            poss_duan.append([pos_d])
+                            pos = self.compare_line(chunk_zh, chunk_trans, pos_d)
                             # 保存分析后的文章
                             save_cn.append(chunk_zh)
                             save_jp.append(chunk_jp)
                             save_trans.append(chunk_trans)
                             poss.append([pos])
-                    self.save_paras(save_cn, save_trans, save_jp, poss, f_name)
+                    self.save_paras_duan(save_cn, save_trans, save_jp, poss_duan, f_name)
+                    self.save_paras_line(save_cn, save_trans, save_jp, poss, f_name)
         except Exception as err:
             traceback.print_exc()
             print("读取文件出现错误::%s"%(str(err)))
 
 
-    def save_paras(self, _paras_cn, _paras_trasn, _paras_jp, _pos, fname,show_len=1):
-        save_dir = self.save_dir
-        random_dir = self.random_dir
+    def save_paras_duan(self, _paras_cn, _paras_trasn, _paras_jp, _pos, fname,show_len=1):
+        save_dir = self.save_dir_duan
+        random_dir = self.random_dir_duan
         save_name = os.path.join(save_dir, fname)
         with open(save_name,'w') as f:
             json_result=[]
             for paras_cn, paras_trasn, paras_jp, pos in zip(_paras_cn, _paras_trasn, _paras_jp, _pos):
                 cn_len = len(paras_cn)
                 jp_len = len(paras_jp)
-                for i,p in  enumerate(pos[0]):
+                for p in  pos[0]:
                     match_len = p[2]
                     max_gleu = p[3]
                     zh_floor = max(0, p[0]-show_len)
@@ -645,8 +680,56 @@ class Gleu(object):
                 rf.write(json.dumps(self.random_select(json_result,50),ensure_ascii=False,indent=4))
 
 
+    def save_paras_line(self, zh_paras, trans_paras, jp_paras, poss, fname, show_len=3):
+        save_dir = self.save_dir_line
+        random_dir = self.random_dir_line
+        save_name = os.path.join(save_dir, fname)
+        with open(save_name,'w') as f:
+            json_result=[]
+            for paras_cn, paras_trans, paras_jp, pos in zip(zh_paras, trans_paras, jp_paras, poss):
+                f1 = lambda x,y:x+y
+                paras_cn = reduce(f1, paras_cn)
+                paras_trans = reduce(f1, paras_trans)
+                paras_jp = reduce(f1, paras_jp)
+                cn_len = len(paras_cn)
+                jp_len = len(paras_jp)
+                for p in  pos[0]:
+                    match_len = p[2]
+                    max_gleu = p[3]
+                    _type = p[4]
+                    if max_gleu < 0.09:
+                        _type = 2 if not _type else 3
+                    zh_floor = max(0, p[0]-show_len)
+                    zh_ceil = min(cn_len, p[0]+show_len+1)
+                    jp_floor = max(0, p[1]-show_len)
+                    jp_ceil = min(jp_len, p[1]+match_len+show_len)
+                    content = OrderedDict()
+                    content["ZH"] = paras_cn[p[0]]
+                    content["JP"] = "【分行】".join(paras_jp[p[1]:p[1]+p[2]])
+                    content["JP_TRANS"] = "【分行】".join(paras_trans[p[1]:p[1]+p[2]])
+                    content["CONTEXT_ZH"] = " 【分行】 ".join(paras_cn[zh_floor:zh_ceil])
+                    content["CONTEXT_JP"] = " 【分行】 ".join(paras_jp[jp_floor:jp_ceil])
+                    content["CONTEXT_TRANS"] = " 【分行】 ".join(paras_trans[jp_floor:jp_ceil])
+                    content["MATCHED_LEN"] = p[2]
+                    content["GLEU"] = p[3]
+                    content["TYPE"] = _type
+                    content["MATCHED"] = 0
+                    json_result.append(content)
+            #print(fname,":",len(json_result),"\n")
+            f.write(json.dumps(json_result,ensure_ascii=False,indent=4))
+            random_name = os.path.join(random_dir,"%s_.random"%fname)
+            with open(random_name,"w") as rf:
+                rf.write(json.dumps(self.random_select(json_result,50),ensure_ascii=False,indent=4))
+
     def random_select(self,l,l_len):
         return random.sample(l,l_len)
+
+    def deep(self,a):
+        if isinstance(a,list):
+            if len(a) > 0:
+                return 1 + self.deep(a[0])
+        else:
+            return 0
 
 
 if __name__ == "__main__":
@@ -654,9 +737,13 @@ if __name__ == "__main__":
     cn_dir = "books/pad/cn/"
     jp_dir = "books/pad/jp/"
     trans_dir = "books/trans/jp/"
-    save_dir = "books/result2/"
-    random_dir ="books/random2/"
-    g = Gleu(save_dir,random_dir)
+    save_dir_duan = "books/result2/duan/"
+    random_dir_duan ="books/random2/duan/"
+
+    save_dir_line = "books/result2/line/"
+    random_dir_line = "books/random2/line/"
+
+    g = Gleu(save_dir_duan, random_dir_duan, save_dir_line, random_dir_line)
     g.compare(cn_dir, jp_dir, trans_dir)
     end = time.time()
     print("spend time :",end-begin)

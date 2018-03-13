@@ -11,8 +11,9 @@ PARAS_ANALYSIS = "result/analysis_paras.txt"
 PARAS_RAT="tmp/"
 def basic_info(file, p=True):
     file_name = file
-    with open(os.path.join(DIR_, file_name),"r") as f:
-        json_result = json.loads(f.read())
+    #with open(os.path.join(DIR_, file_name),"r") as f:
+    f = open(file,"r")
+    json_result = json.loads(f.read())
     analysis = OrderedDict()
     analysis["success"] = 0
     analysis["one_to_many"] = 0
@@ -50,8 +51,8 @@ def basic_info(file, p=True):
 
 def paras_info(filename,p=True):
     file_name = filename
-    with open(os.path.join(DIR_, file_name),"r") as f:
-        json_result = json.loads(f.read())
+    f = open(filename,"r")
+    json_result = json.loads(f.read())
     analysis = OrderedDict()
     analysis["success"] = []
     analysis["one_to_many"] = []
@@ -94,8 +95,8 @@ def paras_info(filename,p=True):
 
 def paras_rate(filename,p=True):
     file_name = filename
-    with open(os.path.join(PARAS_RAT, file_name), "r") as f:
-        json_result = json.loads(f.read())
+    f=oepn(filename,"r")
+    json_result = json.loads(f.read())
     analysis = OrderedDict()
     analysis["success"] = [[]]
     analysis["one_to_many"] = [[]]
@@ -129,6 +130,7 @@ def paras_rate(filename,p=True):
         if not len(v[0]): continue
         v0 = np.array(list(map(abs,v[0])))
         v.append(np.mean(v0))
+        v.append(len(v[0]))
     if p:
         print(json.dumps(analysis, ensure_ascii=False, indent=4))
     else:
