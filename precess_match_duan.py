@@ -60,7 +60,10 @@ class Gleu(object):
         return min(common_length/t_len,common_length/o_len)
 
 
-    def acc_gleu_compare(self,ti,oi):
+    def acc_gleu_compare(self, ti, oi, len_match=3):
+        """
+        现存在一个bug 就是在两句有一样的gleu值时 会去匹配正确句子的前向更长者
+        """
         ct = self.acc_t[ti]
         acc_o = self.acc_o[oi]
         len_match = len(acc_o)
@@ -79,6 +82,45 @@ class Gleu(object):
                 max_gleu = tmp_gleu
                 match_len = i+1
         return max_gleu,match_len
+
+
+    def acc_match(self, zh_i, t_i, t_index):
+        ct = self.acc_t[zh_i]
+        acc_o = self.acc_o[t_i]
+        len_match = len(acc_o)
+        if len_match < t_index + 1:
+            return None
+        co = acc_o[t_index]
+        t_len = len (ct)
+        o_len = len(co)
+        if not t_len or not o_len:
+            return None
+        common_length = len(ct&co)
+        gleu = min(common_length/t_len,common_length/o_len)
+        return gleu
+
+
+    def acc_gleu_match(self, zh_i, t_ceil_i, t_floor_i, len_match=3):
+        """
+        修复acc_gleu_compare函数的bug
+        """
+        max_gleu = 0
+        max_zh_i = None
+        max_trans_i = None
+        match_len = None
+        for step in range(len_match):
+            for trans_i in range(t_ceil_i, t_floor_i):
+                gleu = self.acc_match(zh_i, trans_i, step)
+                if gleu is None:
+                    continue
+                if gleu > max_gleu:
+                    max_gleu = gleu
+                    max_zh_i = zh_i
+                    max_trans_i = trans_i
+                    match_len = step
+        if max_zh_i is None :return None
+        return [max_zh_i, max_trans_i, match_len, max_gleu]
+
 
     def rule_getpos(self, zh_i, trans_i, matched_len):
         max_gleu = 0.0
@@ -148,7 +190,11 @@ class Gleu(object):
             ceil_rate = max(0,rate_zh_d-0.02)
             floor_rate = min(1,rate_zh_d+0.02)
             begin = max(0,int(len_duan_jp*ceil_rate-0.3*distance))
+            if abs(begin-in_t) < 3:
+                begin = max(0,in_t-3)
             end = min(len_duan_jp-1,int(len_duan_jp*floor_rate)+distance)
+            if abs(end-in_t) < 3:
+                end = min(len_duan_jp-1, in_t+3)
             #if in_t ==0:
             #    print(ceil_rate," ",floor_rate,  " ", begin_d, " ", end_d, " ", begin, " ", end)
             
@@ -218,34 +264,18 @@ class Gleu(object):
             ceil_trans_index = trans_duan_line[trans_index]
             floor_trans_index = trans_duan_line[trans_index+match_len-1] + len(trans_paras[trans_index+match_len-1])
             for zh_i in range(ceil_zh_index,floor_zh_index):
-                max_gleu = 0
-                max_zh_i = None
-                max_trans_i = None
-                match_len = None
-                for trans_i in range(ceil_trans_index, floor_trans_index):
-                    gleu, _match_len = self.acc_gleu_compare(zh_i, trans_i)
-                    if gleu > max_gleu:
-                        max_gleu = gleu
-                        max_zh_i = zh_i
-                        max_trans_i = trans_i
-                        match_len = _match_len
-                if not max_zh_i:continue
+                pos = self.acc_gleu_match(zh_i, ceil_trans_index, floor_trans_index, len_match)
+                if pos is None : continue
                 _type = 0
-                if match_len > 1 and self.trans_pattern.match(jiec_zh[zh_i]):
-                    index, t_gleu = self.rule_getpos(max_zh_i,max_trans_i,match_len)
+                max_zh_i, max_trans_i, match_len, max_gleu = pos
+                if match_len+1 > 1 and self.trans_pattern.match(jiec_zh[zh_i]):
+                    index, t_gleu = self.rule_getpos(max_zh_i,max_trans_i,match_len+1)
                     if index is not None and self.trans_pattern.match(jiec_jp[max_trans_i+index]):
                         _type = 1
                         max_trans_i += index
                         match_len = 1
                         max_gleu = t_gleu
-                result_pos.append([max_zh_i, max_trans_i, match_len, max_gleu, _type])
-                # ######
-                # test_line = jiec_zh[zh_i]
-                # if len(test_line)==len(s) and test_line==s:
-                #     print("翻译：","【分行】".join(jiec_jp[ceil_trans_index:floor_trans_index]))
-                #     print("jp:","【分行】".join(jiec_jp[max_trans_i:max_trans_i+match_len]))
-                #     print("ngram:",self.acc_o[max_trans_i])
-                # ######
+                result_pos.append([max_zh_i, max_trans_i, match_len+1, max_gleu, _type])
         return result_pos
 
 
@@ -285,7 +315,7 @@ class Gleu(object):
                     #句子的内容
                     sentence = full_paras[lines_index].strip()
                     #每一个段落的句子‘数’
-                    paras_len = int(b_sens.split()[0])
+                    paras_len = int("".join(b_sens.split()[:-1]))
                     content = sentence.split()
                     #如果是章节或者序列的标志
                     if paras_len==1 and len(content)==3 :
@@ -373,7 +403,7 @@ class Gleu(object):
                     #句子的内容
                     sentence = full_paras[lines_index].strip()
                     #每一个段落的句子‘数’
-                    paras_len = int(b_sens.split()[0])
+                    paras_len = int("".join(b_sens.split()[:-1]))
                     content = sentence.split()
                     #如果是章节或者序列的标志
                     if paras_len==1 and len(content)==3 :
@@ -464,7 +494,7 @@ class Gleu(object):
                     #句子的内容
                     sentence = full_paras[lines_index].strip()
                     #每一个段落的句子‘数’
-                    paras_len = int(b_sens.split()[0])
+                    paras_len = int("".join(b_sens.split()[:-1]))
                     content = sentence.split()
                     #如果是章节或者序列的标志
                     join_content = "".join(content[:-1])
@@ -520,7 +550,7 @@ class Gleu(object):
                     #句子的内容
                     sentence = o_full_paras[lines_index].strip()
                     #每一个段落的句子‘数’
-                    paras_len = int(b_sens.split()[0])
+                    paras_len = int("".join(b_sens.split()[:-1]))
                     content = sentence.split()
                     #如果是章节或者序列的标志
                     join_content = "".join(content[:-1])
